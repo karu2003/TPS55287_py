@@ -12,18 +12,16 @@ class TSP55287:
     :type address: int
     """
 
-    def __init__(self, bus=None, address=0x28, en_pin=4):
+    def __init__(self, bus=None, address=0x74):
         self.addr = address
         self.bus = bus
-        self.en_pin = en_pin
         self.where = platform.system()
         self.config = None
 
         self._initialize_bus()
-        self._initialize_gpio()
 
     def _initialize_bus(self):
-        """Инициализация I2C шины в зависимости от платформы."""
+        """Initialize the I2C bus depending on the platform."""
         try:
             if self.where == "Linux":
                 self.bus = self._initialize_linux_bus()
@@ -32,22 +30,22 @@ class TSP55287:
 
                 self.bus = SMBus()
             else:
-                raise EnvironmentError("Платформа не поддерживается.")
+                raise EnvironmentError("Platform not supported.")
         except Exception as e:
-            print(f"Ошибка инициализации I2C шины: {e}")
+            print(f"Error initializing the I2C bus: {e}")
 
     def _initialize_linux_bus(self):
         import smbus
 
-        """Инициализация I2C шины для Linux."""
-        if "raspberrypi" in platform.uname().machine.lower():
+        """Initialize the I2C bus for Linux."""
+        if "raspberrypi" or "aarch64" in platform.uname().machine.lower():
             return smbus.SMBus(
                 self.bus or 1
-            )  # I2C bus номер 1 для Raspberry Pi по умолчанию
+            )  # I2C bus number 1 is the default for Raspberry Pi
         return smbus.SMBus(self._detect_i2c_bus())
 
     def _detect_i2c_bus(self):
-        """Определение I2C шины для устройств на Linux."""
+        """Detect the I2C bus for devices on Linux."""
         try:
             p = subprocess.Popen(["i2cdetect", "-l"], stdout=subprocess.PIPE)
             for line in p.stdout:
@@ -57,24 +55,11 @@ class TSP55287:
                     if match:
                         return int(match.group(1))
         except subprocess.SubprocessError as e:
-            print(f"Ошибка определения I2C шины: {e}")
+            print(f"Error detecting the I2C bus: {e}")
         return None
 
-    def _initialize_gpio(self):
-        """Инициализация GPIO для Raspberry Pi."""
-        if self.is_raspberry_pi():
-            try:
-                import RPi.GPIO as gpio
-
-                gpio.setwarnings(False)
-                gpio.setmode(gpio.BCM)
-                gpio.setup(self.en_pin, gpio.OUT)
-                self.gpio = gpio
-            except ImportError:
-                print("Модуль RPi.GPIO не установлен.")
-
     def is_raspberry_pi(self):
-        """Проверка, является ли текущая платформа Raspberry Pi."""
+        """Check if the current platform is a Raspberry Pi."""
         return os.path.exists("/proc/device-tree/model")
 
     def __read_byte(self, reg):
@@ -83,15 +68,8 @@ class TSP55287:
     def __write_byte(self, reg, data):
         return self.bus.write_byte_data(self.addr, reg, data)
 
-    def hard_reset(self):
-        self.gpio.output(self.en_pin, self.gpio.HIGH)
-        sleep(0.2)
-        self.gpio.output(self.en_pin, self.gpio.LOW)
-
-
 def main():
-    addr = 0x28
-    en_pin = 4
+    addr = 0x74
     BB = TSP55287()
 
 
