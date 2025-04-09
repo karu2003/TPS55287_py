@@ -662,7 +662,7 @@ def main():
     # status = BB.get_status()
     # print(f"Current STATUS value: {status}")
 
-    vout = 5.3  # Desired output voltage
+    vout = 15.0  # Desired output voltage
 
     # try:
     #     result = BB.calculate_vref_and_intfb_with_min_error(vout)
@@ -675,7 +675,7 @@ def main():
     #     print(f"Error: {e}")
 
     # Set VREF and INTFB
-    # BB.set_iout_limit_from_current(1, 1.0)  # Set IOUT_LIMIT to 2.5A
+    BB.set_iout_limit_from_current(1, 1.0)  # Set IOUT_LIMIT to 2.5A
     BB.set_vout(vout)
 
     BB.set_mode(oe=1)
