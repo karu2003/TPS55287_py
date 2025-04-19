@@ -5,7 +5,7 @@
 from time import sleep
 from tps55287 import TSP55287
 
-BB = TSP55287()
+BB = TSP55287(verbose=False)
 vout = 4.6
 iout = 1.2
 

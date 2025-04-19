@@ -4,6 +4,7 @@ import subprocess
 import re
 import platform
 import os
+from i2c_diagnostic import check_specific_i2c_device, provide_recommendations
 
 
 class TSP55287:
@@ -111,8 +112,128 @@ class TSP55287:
         self.config = None
         self.rshunt = rshunt
         self.verbose = verbose
+        self.device_found = False  # Add attribute to track device presence
 
         self._initialize_bus()
+        
+        # Check for device presence on the I2C bus
+        self.device_found = self._check_device_presence()
+        if not self.device_found:
+            print("ERROR: Device not found. Exiting program.")
+            exit(1)
+
+    def _check_device_presence(self):
+        """Checks for the presence of a device with the specified address on the I2C bus."""
+        if self.where != "Linux" or self.bus is None:
+            return False
+            
+        try:
+            # Get the bus number
+            bus_num = getattr(self.bus, 'bus', 1)
+            
+            # Use the imported function from i2c_diagnostic.py
+            found = check_specific_i2c_device(bus_num, self.addr, verbose=self.verbose)
+
+            if not found:
+                print(f"Warning: Device with address 0x{self.addr:02x} not found on I2C bus {bus_num}")
+                print("The device may not be connected or the address might be incorrect.")
+                
+                # Provide troubleshooting recommendations
+                if self.verbose:
+                    provide_recommendations(verbose=True)
+                else:
+                    print("Run with verbose=True for detailed I2C diagnostics.")
+                return False
+            elif found:
+                if self.verbose:
+                    print(f"Device with address 0x{self.addr:02x} found on I2C bus {bus_num}")
+                return True 
+
+                
+        except Exception as e:
+            print(f"Error during I2C device check: {e}")
+            if self.verbose:
+                provide_recommendations(verbose=True)
+            else:
+                print("Run with verbose=True for detailed I2C diagnostics.")
+            return False
+    
+    def _diagnose_i2c_bus(self, bus_num=None):
+        """Performs diagnostic checks on the I2C bus."""
+        if bus_num is None:
+            bus_num = getattr(self.bus, 'bus', 1)
+            
+        print("\nPerforming I2C bus diagnostics...")
+        
+        # Check if I2C is enabled
+        try:
+            with open('/boot/config.txt', 'r') as f:
+                config = f.read()
+                if "dtparam=i2c_arm=on" not in config and "dtparam=i2c=on" not in config:
+                    print("Warning: I2C may not be enabled in /boot/config.txt")
+        except:
+            pass
+            
+        # Check for available devices
+        try:
+            print("\nAvailable I2C devices:")
+            p = subprocess.Popen(
+                ["i2cdetect", "-y", str(bus_num)], 
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            output, error = p.communicate()
+            print(output.decode("utf-8"))
+            
+            if "Error" in error.decode("utf-8"):
+                print(f"Error accessing I2C bus {bus_num}: {error.decode('utf-8')}")
+        except:
+            print("Could not run i2cdetect. Make sure i2c-tools is installed.")
+            
+        # Check permissions
+        try:
+            import os
+            import stat
+            i2c_dev = f"/dev/i2c-{bus_num}"
+            if os.path.exists(i2c_dev):
+                st = os.stat(i2c_dev)
+                perms = stat.filemode(st.st_mode)
+                print(f"\nPermissions for {i2c_dev}: {perms}")
+                
+                if not (perms[4] == 'r' and perms[5] == 'w'):
+                    print(f"Warning: Insufficient permissions for {i2c_dev}")
+                    print("Try running with sudo or add your user to the i2c group:")
+                    print("  sudo usermod -aG i2c $USER")
+            else:
+                print(f"\nWarning: {i2c_dev} device does not exist")
+                
+        except Exception as e:
+            print(f"Error checking I2C permissions: {e}")
+            
+        print("\nTroubleshooting suggestions:")
+        print("1. Check physical connections and wiring")
+        print("2. Verify power to the I2C device")
+        print("3. Check for address conflicts")
+        print("4. Try a lower I2C bus speed (e.g., sudo sh -c 'echo 10000 > /sys/module/i2c_bcm2708/parameters/baudrate')")
+        print("5. Use a logic analyzer or oscilloscope to check I2C signals")
+        print("6. For RPi: Make sure I2C is enabled in raspi-config")
+    
+    def _retry_operation(self, operation, retries=3, delay=0.1):
+        """Retry an operation with exponential backoff."""
+        last_exception = None
+        for attempt in range(retries):
+            try:
+                if attempt > 0 and self.verbose:
+                    print(f"Retry attempt {attempt+1}/{retries}...")
+                sleep(delay * (2**attempt))  # Exponential backoff
+                return operation()
+            except OSError as e:
+                last_exception = e
+                if self.verbose:
+                    print(f"I/O error on attempt {attempt+1}: {e}")
+        
+        # If we get here, all retries failed
+        raise last_exception
 
     def _initialize_bus(self):
         """Initialize the I2C bus depending on the platform."""
@@ -157,10 +278,26 @@ class TSP55287:
         return os.path.exists("/proc/device-tree/model")
 
     def __read_byte(self, reg):
-        return self.bus.read_byte_data(self.addr, reg)
+        """Read a byte from the register with improved error handling and retries."""
+        try:
+            return self._retry_operation(lambda: self.bus.read_byte_data(self.addr, reg))
+        except OSError as e:
+            if e.errno == 121:  # Remote I/O error
+                print(f"ERROR: Remote I/O error reading register 0x{reg:02x} from device at 0x{self.addr:02x}")
+                print("Communication with the device failed after multiple attempts.")
+                print("Run the i2cdetect command to verify device presence.")
+            raise
 
     def __write_byte(self, reg, data):
-        return self.bus.write_byte_data(self.addr, reg, data)
+        """Write a byte to the register with improved error handling and retries."""
+        try:
+            return self._retry_operation(lambda: self.bus.write_byte_data(self.addr, reg, data))
+        except OSError as e:
+            if e.errno == 121:  # Remote I/O error
+                print(f"ERROR: Remote I/O error writing value 0x{data:02x} to register 0x{reg:02x} at device 0x{self.addr:02x}")
+                print("Communication with the device failed after multiple attempts.")
+                print("Run the i2cdetect command to verify device presence.")
+            raise
 
     def read_register_by_name(self, name):
         """Read a register by its name."""
