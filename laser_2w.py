@@ -12,5 +12,5 @@ iout = 1.2
 BB.set_iout_limit_from_current(1, iout)  
 BB.set_vout(vout)
 BB.set_mode(oe=1)
-sleep(0.5)
+sleep(2.0)
 BB.set_mode(oe=0)
